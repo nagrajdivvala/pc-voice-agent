@@ -1,0 +1,10 @@
+git+https://github.com/pipecat-ai/pipecat.git@main#egg=pipecat-ai[daily,cartesia,openai,silero,deepgram,azure]
+fastapi
+uvicorn
+python-dotenv
+loguru
+langchain_community
+langchain_openai
+azure-identity
+azure-messaging-webpubsubservice
+azure-core
