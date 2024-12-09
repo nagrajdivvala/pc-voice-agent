@@ -5,7 +5,7 @@ import logging
 import asyncio
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from bot5 import run_bot  # Assuming `run_bot` processes audio data and provides responses
+from bot6 import run_bot  # Assuming `run_bot` processes audio data and provides responses
 from typing import Dict
 
 # Set up logging
@@ -40,41 +40,58 @@ async def start_call():
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """
-    WebSocket handler for real-time bi-directional audio streaming.
+    WebSocket handler for real-time bidirectional audio streaming with ACS.
     """
     await websocket.accept()
-    logger.info("WebSocket connection accepted")
+    logging.info("WebSocket connection accepted.")
+
+    subscription_id = None  # Initialize subscription ID
 
     try:
-        # Step 1: Wait for the initial connection and incoming audio stream from ACS (ACS sends audio packets with callConnectionId embedded)
         async for message in websocket.iter_text():
-            try:
-                packet = json.loads(message)
-                kind = packet.get("kind")
+            packet = json.loads(message)
+            kind = packet.get("kind")
 
-                if kind == "AudioData":
-                    # Audio data is sent directly in the media stream
-                    audio_data = packet.get("audioData")
-                    if audio_data:
-                        logger.info(f"AudioData: {packet}")
-                        logger.info(f"Received AudioData for Call Connection ID: {packet.get('callConnectionId')}")  # The callConnectionId will be part of the stream
+            if kind == "AudioMetadata":
+                # Extract and store subscription ID from AudioMetadata
+                metadata = packet.get("audioMetadata", {})
+                subscription_id = metadata.get("subscriptionId")
+                logging.info(f"Received AudioMetadata with subscriptionId: {subscription_id}")
 
-                        # Process audio with `run_bot`
-                        await run_bot(websocket, packet.get('callConnectionId'))  # Ensure run_bot uses the callConnectionId
+            elif kind == "AudioData" and subscription_id:
+                # Process AudioData if subscription ID is known
+                audio_data = packet.get("audioData", {})
+                raw_audio = audio_data.get("data")
+                if audio_data.get("silent"):
+                    logging.info(f"Silent audio packet for subscriptionId: {subscription_id}")
+                    continue
 
-                elif kind == "AudioMetadata":
-                    # Handle Audio Metadata (this might include information about the call, participant, etc.)
-                    metadata = packet.get("audioMetadata")
-                    logger.info(f"Received Audio Metadata: {metadata}")
+                logging.info(f"Processing AudioData for subscriptionId: {subscription_id}")
 
-            except Exception as e:
-                logger.error(f"Error processing WebSocket message: {e}")
-                break
+                # Pass the raw audio to the bot for processing
+                await run_bot(websocket, subscription_id)
+
+                # # Send the processed audio back to ACS
+                # response_packet = {
+                #     "kind": "AudioData",
+                #     "audioData": {
+                #         "subscriptionId": subscription_id,
+                #         "data": processed_audio,
+                #         "timestamp": audio_data.get("timestamp"),
+                #         "participantRawID": audio_data.get("participantRawID"),
+                #         "silent": False,
+                #     },
+                # }
+                # await websocket.send_json(response_packet)
+                logging.info(f"Sent processed audio back for subscriptionId: {subscription_id}")
+
+            else:
+                logging.warning("AudioData received before AudioMetadata or missing subscriptionId.")
 
     except Exception as e:
-        logger.error(f"WebSocket error: {e}")
+        logging.error(f"WebSocket error: {e}")
     finally:
-        logger.info("WebSocket connection closed")
+        logging.info("WebSocket connection closed.")
 
 
 

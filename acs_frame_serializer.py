@@ -11,8 +11,8 @@ class ACSFrameSerializer(FrameSerializer):
     Serializer for handling ACS-specific audio streaming frames.
     """
     class InputParams(BaseModel):
-        acs_sample_rate: int = 8000
-        sample_rate: int = 16000
+        acs_sample_rate: int = 24000
+        sample_rate: int = 24000
 
     def __init__(self, stream_sid: str, params: InputParams = InputParams()):
         self._stream_sid = stream_sid  # Unique session identifier for the audio stream
@@ -27,7 +27,7 @@ class ACSFrameSerializer(FrameSerializer):
 
             # Convert PCM to uLaw and encode to base64 for ACS compatibility
             serialized_data = pcm_to_ulaw(data, frame.sample_rate, self._params.acs_sample_rate)
-            payload = base64.b64encode(serialized_data).decode("utf-8")
+            payload = base64.b64encode(data).decode("utf-8")
             answer = {
                 "kind": "AudioData",
                 "audioData": {
@@ -67,7 +67,7 @@ class ACSFrameSerializer(FrameSerializer):
                     payload, self._params.acs_sample_rate, self._params.sample_rate
                 )
                 audio_frame = AudioRawFrame(
-                    audio=deserialized_data, num_channels=1, sample_rate=self._params.sample_rate
+                    audio=payload, num_channels=1, sample_rate=self._params.sample_rate
                 )
                 return audio_frame
 
