@@ -7,8 +7,9 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
-# Assuming the following types are imported from your framework:
-#   - OpenAILLMContext, ChatCompletionMessageParam, ChatCompletionChunk, LLMService, AsyncStream, AsyncOpenAI, NOT_GIVEN
+# Assuming these types are imported from your framework:
+# OpenAILLMContext, ChatCompletionMessageParam, ChatCompletionChunk,
+# LLMService, AsyncStream, AsyncOpenAI, NOT_GIVEN
 
 class CustomAzureOpenAIAsyncLLMService(BaseOpenAILLMService):
     def __init__(
@@ -18,7 +19,8 @@ class CustomAzureOpenAIAsyncLLMService(BaseOpenAILLMService):
         gateway_endpoint: str,
         client_id: str,
         client_secret: str,
-        # Additional parameters (e.g., model, api_key, base_url, params) are passed via kwargs.
+        scope: str,
+        # Additional parameters (model, api_key, base_url, params) are passed via kwargs.
         **kwargs,
     ):
         """
@@ -28,6 +30,7 @@ class CustomAzureOpenAIAsyncLLMService(BaseOpenAILLMService):
         :param gateway_endpoint: Custom gateway endpoint wrapping the Azure OpenAI service.
         :param client_id: Okta client ID.
         :param client_secret: Okta client secret.
+        :param scope: Scope for the Okta token request.
         Additional parameters are passed via kwargs.
         """
         super().__init__(**kwargs)
@@ -35,10 +38,11 @@ class CustomAzureOpenAIAsyncLLMService(BaseOpenAILLMService):
         self.gateway_endpoint = gateway_endpoint
         self.client_id = client_id
         self.client_secret = client_secret
+        self.scope = scope
 
     async def _get_okta_token(self) -> str:
         """
-        Asynchronously fetches an Okta access token.
+        Asynchronously fetches an Okta access token using client credentials grant.
 
         :return: Access token as a string.
         :raises Exception: If the token cannot be obtained.
@@ -47,6 +51,7 @@ class CustomAzureOpenAIAsyncLLMService(BaseOpenAILLMService):
             "client_id": self.client_id,
             "client_secret": self.client_secret,
             "grant_type": "client_credentials",
+            "scope": self.scope,
         }
         async with httpx.AsyncClient() as client:
             response = await client.post(self.token_url, data=payload)
@@ -64,8 +69,8 @@ class CustomAzureOpenAIAsyncLLMService(BaseOpenAILLMService):
     ) -> AsyncStream["ChatCompletionChunk"]:
         """
         Asynchronously calls the custom gateway to perform a chat completion and returns
-        an AsyncStream of ChatCompletionChunk objects. This closely mirrors the behavior of
-        the base class, which returns the output of self._client.chat.completions.create(**params).
+        an AsyncStream of ChatCompletionChunk objects. This closely mimics the behavior of
+        self._client.chat.completions.create(**params) in the base class.
 
         :param context: The OpenAILLMContext containing tools and tool_choice.
         :param messages: List of chat messages.
@@ -101,8 +106,7 @@ class CustomAzureOpenAIAsyncLLMService(BaseOpenAILLMService):
                 stream=True
             )
             response.raise_for_status()
-            # Wrap the httpx.Response in an AsyncStream using self._client.
-            # This returns the same type as self._client.chat.completions.create(**params)
+            # Wrap the streaming response in an AsyncStream using self._client
             return AsyncStream(
                 cast_to=ChatCompletionChunk,
                 response=response,
@@ -114,8 +118,8 @@ class CustomAzureOpenAIAsyncLLMService(BaseOpenAILLMService):
     ) -> AsyncStream["ChatCompletionChunk"]:
         """
         Calls the custom gateway for streaming chat completions without additional processing.
-        This method simply retrieves messages from the context and delegates to get_chat_completions,
-        ensuring the returned type is an AsyncStream, just like in the base class.
+        This method retrieves messages from the context and delegates to get_chat_completions,
+        ensuring the returned type is an AsyncStream as expected by upstream components.
 
         :param context: The OpenAILLMContext containing messages and additional data.
         :return: An AsyncStream yielding chat completion chunks.
