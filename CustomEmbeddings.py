@@ -2,15 +2,13 @@ from __future__ import annotations
 import os
 import requests
 from typing import Any, List, Dict
-from pydantic import BaseModel, Field, SecretStr
-from langchain_openai.embeddings import OpenAIEmbeddings  # Inherit tokenization/batching if needed
+from langchain_openai.embeddings import OpenAIEmbeddings
 
 class CustomGatewayClient:
     """
-    Client for calling your custom gateway.
-    
-    This client sends a payload of the form {"input": "text"} and uses an OAuth2 token
-    (fetched via Okta) for authentication.
+    A simple client for calling your custom gateway.
+    This client sends a payload of the form {"input": "text"}
+    with an OAuth2 Bearer token (fetched via Okta) for authentication.
     """
     def __init__(self, endpoint: str, token: str):
         self.endpoint = endpoint
@@ -18,7 +16,6 @@ class CustomGatewayClient:
 
     def create(self, input: str) -> Dict:
         headers = {"Authorization": f"Bearer {self.token}"}
-        # The payload is exactly as required by your service:
         payload = {"input": input}
         response = requests.post(self.endpoint, headers=headers, json=payload)
         response.raise_for_status()
@@ -27,76 +24,96 @@ class CustomGatewayClient:
 
 class CustomAzureOpenAIOAuthEmbeddings(OpenAIEmbeddings):
     """
-    Custom embeddings class that mimics AzureOpenAIEmbeddings
-    but authenticates using OAuth2 via Okta.
+    Custom embeddings class that mimics AzureOpenAIEmbeddings but uses OAuth2 via Okta.
     
-    The underlying custom gateway expects a payload like:
+    The custom gateway expects a payload like:
         {"input": "text"}
-    and returns a response in the same format as Azure OpenAI.
+    and returns a response in the format:
+        {"data": [{"embedding": [ ... ]}]}
     """
-    # Configuration parameters (can be set via environment variables)
-    custom_endpoint: str = Field(..., env="CUSTOM_GATEWAY_ENDPOINT")
-    client_id: SecretStr = Field(..., env="CUSTOM_GATEWAY_CLIENT_ID")
-    client_secret: SecretStr = Field(..., env="CUSTOM_GATEWAY_CLIENT_SECRET")
-    okta_token_url: str = Field(..., env="OKTA_TOKEN_URL")
     model: str = "text-embedding-3-small"  # or your chosen model
-    chunk_size: int = 2048  # can be adjusted as needed
+    chunk_size: int = 2048  # adjust as needed
+
+    def __init__(self, **data: Any):
+        # Initialize any OpenAIEmbeddings fields.
+        super().__init__(**data)
+
+        # Load environment variables using os.getenv
+        custom_endpoint = os.getenv("CUSTOM_GATEWAY_ENDPOINT")
+        client_id = os.getenv("CUSTOM_GATEWAY_CLIENT_ID")
+        client_secret = os.getenv("CUSTOM_GATEWAY_CLIENT_SECRET")
+        okta_token_url = os.getenv("OKTA_TOKEN_URL")
+
+        # Validate that required environment variables are present.
+        if not custom_endpoint:
+            raise ValueError("CUSTOM_GATEWAY_ENDPOINT environment variable is not set.")
+        if not client_id:
+            raise ValueError("CUSTOM_GATEWAY_CLIENT_ID environment variable is not set.")
+        if not client_secret:
+            raise ValueError("CUSTOM_GATEWAY_CLIENT_SECRET environment variable is not set.")
+        if not okta_token_url:
+            raise ValueError("OKTA_TOKEN_URL environment variable is not set.")
+
+        self.custom_endpoint = custom_endpoint
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.okta_token_url = okta_token_url
+
+        # Fetch the OAuth2 token from Okta using the client credentials.
+        token = self._fetch_oauth_token()
+
+        # Initialize the custom client with the endpoint and token.
+        self.client = CustomGatewayClient(self.custom_endpoint, token)
 
     def _fetch_oauth_token(self) -> str:
         """
-        Fetch an OAuth2 token from Okta using client credentials.
-        Adjust the payload (e.g. 'scope') as required by your setup.
+        Fetches an OAuth2 token from Okta using client credentials.
+        Adjust the payload (e.g. scope) as needed for your configuration.
         """
         token_data = {
             "grant_type": "client_credentials",
-            "client_id": self.client_id.get_secret_value(),
-            "client_secret": self.client_secret.get_secret_value(),
-            "scope": "your_scope_here"  # adjust the scope as needed
+            "client_id": self.client_id,
+            "client_secret": self.client_secret,
+            "scope": "your_scope_here"  # Adjust the scope as needed.
         }
         response = requests.post(self.okta_token_url, data=token_data)
         response.raise_for_status()
         token_response = response.json()
-        return token_response["access_token"]
-
-    def __init__(self, **data: Any):
-        super().__init__(**data)
-        # Use the OAuth2 token from Okta instead of an API key or AAD token.
-        token = self._fetch_oauth_token()
-        # Create our custom client that sends the simple payload.
-        self.client = CustomGatewayClient(self.custom_endpoint, token)
+        token = token_response.get("access_token")
+        if not token:
+            raise ValueError("No access_token found in the token response.")
+        return token
 
     def embed_query(self, text: str) -> List[float]:
         """
-        Embed a single query text by calling the custom gateway.
-        The payload sent is simply {"input": text}.
+        Embeds a single query text by sending {"input": text} to the custom gateway.
+        Expects the response to contain an embedding at response["data"][0]["embedding"].
         """
         response = self.client.create(input=text)
-        # Expected response format: {"data": [{"embedding": [ ... ]}]}
         return response["data"][0]["embedding"]
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
         """
-        Embed multiple texts by calling embed_query for each.
+        Embeds multiple documents by calling embed_query on each text.
         """
         return [self.embed_query(text) for text in texts]
 
-    # Optionally, you can implement asynchronous versions (aembed_query/aembed_documents)
-    # if required by your use case.
-    
-# === Usage Example ===
+
+# === Example Usage ===
 if __name__ == "__main__":
-    # Make sure the following environment variables are set:
-    #   CUSTOM_GATEWAY_ENDPOINT, CUSTOM_GATEWAY_CLIENT_ID,
-    #   CUSTOM_GATEWAY_CLIENT_SECRET, OKTA_TOKEN_URL
+    # Make sure your .env file is loaded (if using one):
+    # from dotenv import load_dotenv
+    # load_dotenv()
+
+    # Instantiate the embeddings class.
     embeddings = CustomAzureOpenAIOAuthEmbeddings()
-    
-    # This call uses the inherited embed_query method,
-    # which now sends a payload {"input": "text"} to your custom gateway.
+
+    # Test embedding a query.
     query = "What is the meaning of life?"
-    embedding_vector = embeddings.embed_query(query)
-    print("First three dimensions of embedding:", embedding_vector[:3])
-    
-    # You can also use embed_documents to embed multiple texts.
+    vector = embeddings.embed_query(query)
+    print("Query embedding (first three dimensions):", vector[:3])
+
+    # Test embedding multiple documents.
     docs = ["Document one text", "Document two text"]
-    docs_embeddings = embeddings.embed_documents(docs)
-    print("Embedding for first document:", docs_embeddings[0][:3])
+    docs_vectors = embeddings.embed_documents(docs)
+    print("First document embedding (first three dimensions):", docs_vectors[0][:3])
