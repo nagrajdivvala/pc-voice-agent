@@ -3,6 +3,7 @@ import os
 import requests
 from typing import Any, List, Dict
 from langchain_openai.embeddings import OpenAIEmbeddings
+from pydantic import PrivateAttr
 
 class CustomGatewayClient:
     """
@@ -34,6 +35,12 @@ class CustomAzureOpenAIOAuthEmbeddings(OpenAIEmbeddings):
     model: str = "text-embedding-3-small"  # or your chosen model
     chunk_size: int = 2048  # adjust as needed
 
+    # Declare private attributes to store configuration values
+    _custom_endpoint: str = PrivateAttr()
+    _client_id: str = PrivateAttr()
+    _client_secret: str = PrivateAttr()
+    _okta_token_url: str = PrivateAttr()
+
     def __init__(self, **data: Any):
         # Initialize any OpenAIEmbeddings fields.
         super().__init__(**data)
@@ -54,16 +61,17 @@ class CustomAzureOpenAIOAuthEmbeddings(OpenAIEmbeddings):
         if not okta_token_url:
             raise ValueError("OKTA_TOKEN_URL environment variable is not set.")
 
-        self.custom_endpoint = custom_endpoint
-        self.client_id = client_id
-        self.client_secret = client_secret
-        self.okta_token_url = okta_token_url
+        # Assign to private attributes
+        self._custom_endpoint = custom_endpoint
+        self._client_id = client_id
+        self._client_secret = client_secret
+        self._okta_token_url = okta_token_url
 
         # Fetch the OAuth2 token from Okta using the client credentials.
         token = self._fetch_oauth_token()
 
         # Initialize the custom client with the endpoint and token.
-        self.client = CustomGatewayClient(self.custom_endpoint, token)
+        self.client = CustomGatewayClient(self._custom_endpoint, token)
 
     def _fetch_oauth_token(self) -> str:
         """
@@ -72,11 +80,11 @@ class CustomAzureOpenAIOAuthEmbeddings(OpenAIEmbeddings):
         """
         token_data = {
             "grant_type": "client_credentials",
-            "client_id": self.client_id,
-            "client_secret": self.client_secret,
+            "client_id": self._client_id,
+            "client_secret": self._client_secret,
             "scope": "your_scope_here"  # Adjust the scope as needed.
         }
-        response = requests.post(self.okta_token_url, data=token_data)
+        response = requests.post(self._okta_token_url, data=token_data)
         response.raise_for_status()
         token_response = response.json()
         token = token_response.get("access_token")
@@ -101,7 +109,7 @@ class CustomAzureOpenAIOAuthEmbeddings(OpenAIEmbeddings):
 
 # === Example Usage ===
 if __name__ == "__main__":
-    # Make sure your .env file is loaded (if using one):
+    # Optionally load your .env file if you're using one:
     # from dotenv import load_dotenv
     # load_dotenv()
 
